@@ -273,9 +273,9 @@
       return String(str).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
     }
 
-    // ---------------- 결과 공개 연출 (쫄깃) ----------------
-    const SPIN_MS = 1400;     // 두구두구 도는 시간
-    const HOLD_MS = 2000;     // 공개 후 결과를 보여주는 시간
+    // ---------------- 결과 공개 연출 (룰렛 서서히 + 내 결과 마지막) ----------------
+    const HOLD_MS = 1900; // 최종 확정 후 머무는 시간
+    function randEmoji() { return EMOJI[CHOICES[Math.floor(Math.random() * 3)]]; }
 
     function outcome(name, entry, mode) {
       if (!entry.eliminated.length) return { cls: 'draw', txt: '무승부' };
@@ -286,66 +286,100 @@
       return elim ? { cls: 'bad', txt: '탈락 💥' } : { cls: 'good', txt: '생존 ✅' };
     }
 
+    // 내 시점의 최종 한 줄 (마지막에 가장 크게 보여줄 문구)
+    function personalVerdict(entry, s) {
+      const mine = me && entry.picks[me.name] !== undefined;
+      if (!mine) {
+        return s.status === 'finished'
+          ? (s.mode === 'last-loser' ? '💀 벌칙 당첨: ' : '🏆 우승: ') + s.winner
+          : entry.note;
+      }
+      if (!entry.eliminated.length) return '🤝 무승부 — 재대결!';
+      if (s.status === 'finished' && s.winner === me.name) {
+        return s.mode === 'last-loser' ? '💀 내가 벌칙 당첨…' : '🏆 내가 우승!!';
+      }
+      const o = outcome(me.name, entry, s.mode);
+      return { '생존 ✅': '😮‍💨 생존 성공!', '탈락 💥': '😭 탈락…',
+               '통과 😎': '😎 통과! 안전!', '잔류 😱': '😱 아직 안 끝났다…' }[o.txt] || o.txt;
+    }
+
     function playReveal(entry, s) {
       revealing = true;
-      const names = Object.keys(entry.picks);
+      const all = Object.keys(entry.picks);
+      const myName = (me && entry.picks[me.name] !== undefined) ? me.name : null;
+      const others = all.filter((n) => n !== myName);
+      const ordered = (myName ? [myName] : []).concat(others); // 내 슬롯을 맨 앞 기준점으로
+
       const overlay = document.createElement('div');
       overlay.className = 'reveal suspense';
       overlay.innerHTML =
         `<div class="drum">🥁 두구두구두구… ROUND ${entry.round}</div>
          <div class="slots">` +
-        names.map((n, i) => `<div class="slot spin" data-i="${i}">
-            <span class="emo">✊</span>
-            <div class="pname">${escapeHtml(n)}</div>
+        ordered.map((n) => `<div class="slot ${n === myName ? 'mine' : 'spin'}" data-name="${encodeURIComponent(n)}">
+            <span class="emo">${n === myName ? EMOJI[entry.picks[n]] : '✊'}</span>
+            <div class="pname">${escapeHtml(n)}${n === myName ? ' (나)' : ''}</div>
             <div class="res"></div>
           </div>`).join('') +
-        `</div><div class="verdict" id="verdict"></div>`;
+        `</div>
+         <div class="myverdict" id="myverdict"></div>
+         <div class="verdict" id="verdict"></div>`;
       document.body.appendChild(overlay);
 
-      const slots = [...overlay.querySelectorAll('.slot')];
-      // 슬롯머신처럼 이모지 빠르게 교체
-      const buzz = setInterval(() => {
-        for (const sl of slots) {
-          sl.querySelector('.emo').textContent = EMOJI[CHOICES[Math.floor(Math.random() * 3)]];
-        }
-      }, 90);
+      const slotEls = {};
+      overlay.querySelectorAll('.slot').forEach((el) => { slotEls[decodeURIComponent(el.dataset.name)] = el; });
+      if (myName) slotEls[myName].classList.add('locked'); // 내 선택은 바로 확정(기준점)
 
-      setTimeout(() => {
-        clearInterval(buzz);
-        // 플래시 + 동시 공개
-        const flash = document.createElement('div');
-        flash.className = 'flashbang';
-        document.body.appendChild(flash);
-        setTimeout(() => flash.remove(), 500);
-        if (navigator.vibrate) navigator.vibrate(60);
-
-        overlay.classList.remove('suspense');
-        slots.forEach((sl) => {
-          const name = names[+sl.dataset.i];
-          const choice = entry.picks[name];
-          sl.querySelector('.emo').textContent = EMOJI[choice];
-          const o = outcome(name, entry, s.mode);
-          sl.classList.remove('spin');
-          sl.classList.add('locked', o.cls);
-          sl.querySelector('.res').textContent = o.txt;
-        });
-
-        const v = overlay.querySelector('#verdict');
-        let verdict = entry.note;
-        if (entry.auto && entry.auto.length) verdict += `  ⏰ ${entry.auto.join(', ')} 시간초과 자동선택`;
-        if (s.status === 'finished') {
-          verdict = (s.mode === 'last-loser' ? '💀 벌칙 당첨: ' : '🏆 우승: ') + s.winner;
-        }
-        v.textContent = verdict;
-        setTimeout(() => v.classList.add('show'), 350);
-
+      // 모든 선택이 멈춘 뒤 → 정적 → '결과 확정'을 마지막에 공개
+      const finish = () => {
         setTimeout(() => {
-          overlay.remove();
-          revealing = false;
-          lastSig = '';
-          if (latestState) render(latestState);
-        }, HOLD_MS);
-      }, SPIN_MS);
+          const flash = document.createElement('div');
+          flash.className = 'flashbang';
+          document.body.appendChild(flash);
+          setTimeout(() => flash.remove(), 500);
+          if (navigator.vibrate) navigator.vibrate([40, 40, 90]);
+          overlay.classList.remove('suspense');
+          for (const n of all) {
+            const o = outcome(n, entry, s.mode);
+            slotEls[n].classList.add(o.cls);
+            slotEls[n].querySelector('.res').textContent = o.txt;
+          }
+          const mv = overlay.querySelector('#myverdict');
+          mv.textContent = personalVerdict(entry, s);
+          requestAnimationFrame(() => mv.classList.add('show'));
+          overlay.querySelector('#verdict').textContent =
+            entry.note + (entry.auto && entry.auto.length ? `  ⏰ ${entry.auto.join(', ')} 시간초과` : '');
+          setTimeout(() => {
+            overlay.remove();
+            revealing = false;
+            lastSig = '';
+            if (latestState) render(latestState);
+          }, HOLD_MS);
+        }, 650); // 공개 직후의 '정적'
+      };
+
+      if (others.length === 0) { finish(); return; }
+
+      // 상대 슬롯: 룰렛처럼 빠르게 돌다가 점점 느려지며 하나씩 멈춤
+      let remaining = others.length;
+      others.forEach((n, i) => {
+        const duration = 1300 + Math.min(i, 4) * 320; // 뒤 사람일수록 조금 더 늦게 멈춤
+        const el = slotEls[n];
+        const emo = el.querySelector('.emo');
+        const start = performance.now();
+        const step = () => {
+          const t = (performance.now() - start) / duration;
+          if (t >= 1) {
+            emo.textContent = EMOJI[entry.picks[n]];
+            el.classList.remove('spin');
+            el.classList.add('locked');
+            if (--remaining === 0) finish();
+            return;
+          }
+          emo.textContent = randEmoji();
+          setTimeout(step, 55 + 240 * t); // t가 커질수록 간격이 벌어짐 = 서서히 멈춤
+        };
+        step();
+      });
     }
 
     // ---------------- 폴링 ----------------

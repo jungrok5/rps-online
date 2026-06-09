@@ -40,7 +40,7 @@ function token() {
 
 const MODES = ['last-winner', 'last-loser'];
 const ALLOWED_SECONDS = [0, 5, 10, 15, 20, 30]; // 0 = 무제한
-const REVEAL_GRACE_MS = 3500; // 결과 공개 연출이 도는 동안 다음 라운드 시간을 깎지 않도록 여유
+const REVEAL_GRACE_MS = 5200; // 결과 공개 연출(룰렛+확정)이 도는 동안 다음 라운드 시간을 깎지 않도록 여유
 
 function createRoom(title, mode, roundSeconds) {
   let id;
