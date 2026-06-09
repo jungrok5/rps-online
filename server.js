@@ -205,7 +205,11 @@ const MIME = {
 function serveFile(res, filePath) {
   fs.readFile(filePath, (err, buf) => {
     if (err) { res.writeHead(404); res.end('Not found'); return; }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream' });
+    res.writeHead(200, {
+      'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream',
+      // 버전 관리가 없으므로 항상 최신을 받도록 캐시를 끈다 (옛 화면 고착 방지)
+      'Cache-Control': 'no-store, must-revalidate',
+    });
     res.end(buf);
   });
 }
