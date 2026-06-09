@@ -151,11 +151,13 @@ function play(c, name, opts) {
   c.current = action;
 }
 
-// 카메라를 향한 가벼운 호(arc) 배치 좌표 (상단에 프레이밍되도록 뒤쪽 z에 배치)
+// 카메라를 향한 가벼운 호(arc) 배치 좌표. 인원이 늘면 간격을 좁혀 화면 밖으로 안 나가게.
 function slot(i, n, gather) {
-  const spacing = Math.min(gather ? 0.95 : 1.45, (gather ? 7 : 11) / Math.max(1, n));
+  const span = gather ? 2.4 : 3.2;           // 양끝 |x| 가 대략 span/2 를 넘지 않도록
+  const cap = gather ? 0.95 : 1.4;
+  const spacing = Math.min(cap, span / Math.max(1, n - 1));
   const x = (i - (n - 1) / 2) * spacing;
-  const z = -1.2 - Math.abs(x) * 0.12; // 모이기여도 앞으로 끌어와 HUD에 가리지 않게: z 유지
+  const z = -1.2 - Math.abs(x) * 0.1;        // 양끝을 살짝 뒤로 (가림 방지)
   return new THREE.Vector3(x, 0, z);
 }
 
@@ -177,7 +179,7 @@ async function spawn(player, i, n) {
 
   const nick = makeLabel('nick', player.name, TARGET_H + 0.35);
   group.add(nick.obj);
-  const rps = makeLabel('rpsemoji', '', TARGET_H + 1.05);
+  const rps = makeLabel('rpsemoji', '', TARGET_H + 0.78);
   rps.obj.visible = false;
   group.add(rps.obj);
 

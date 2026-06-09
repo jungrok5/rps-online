@@ -227,9 +227,9 @@ body.has3d.revealing .wrap { opacity: 0; pointer-events: none; transition: opaci
   position: fixed; left: 50%; transform: translateX(-50%); z-index: 90;
   text-align: center; pointer-events: none; text-shadow: 0 3px 10px #000;
 }
-.r3d-drum { top: 16%; font-size: 1.4rem; font-weight: 800; color: var(--accent); animation: drumShake .25s infinite; }
+.r3d-drum { top: 7%; font-size: 1.4rem; font-weight: 800; color: var(--accent); animation: drumShake .25s infinite; }
 .r3d-verdict {
-  top: 12%; font-size: 1.9rem; font-weight: 900; color: #fff;
+  top: 4%; font-size: 1.9rem; font-weight: 900; color: #fff;
   animation: pop .45s cubic-bezier(.2,1.6,.4,1);
 }
 

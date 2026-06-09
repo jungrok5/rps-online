@@ -2,6 +2,13 @@
 
 링크를 카톡·팀즈로 공유하면, 여러 명이 각자 가위바위보를 내고 **한 명이 남을 때까지** 대결하는 초간단 온라인 가위바위보입니다.
 
+## 스크린샷
+
+| 게임 만들기 | 로비 (3D 캐릭터) | 결과 공개 |
+|:---:|:---:|:---:|
+| ![게임 만들기](docs/create.png) | ![로비](docs/lobby.png) | ![결과 공개](docs/reveal.png) |
+| 방식·제한시간 선택 | 닉네임 단 캐릭터가 모여 대기 | 모여서 ✊✋✌️ → 승/패 연출 |
+
 ## 무료 배포 (Render)
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/jungrok5/rps-online/tree/claude/rps-site-design-tdzeol)
