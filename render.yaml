@@ -3,7 +3,7 @@ services:
     name: gbb-online
     runtime: node
     plan: free
-    branch: claude/rps-site-design-tdzeol
+    branch: main
     buildCommand: npm install
     startCommand: node server.js
     autoDeploy: true
