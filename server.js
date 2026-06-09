@@ -42,6 +42,13 @@ function token() {
   return randomId(16);
 }
 
+// 이름 없이 참여할 때 붙여줄 랜덤 닉네임 (형용사 + 동물)
+const NAME_ADJ = ['날쌘', '용감한', '귀여운', '빛나는', '행복한', '멋진', '엉뚱한', '느긋한', '씩씩한', '잽싼', '든든한', '통큰', '명랑한', '슬기로운', '폭신한', '겁없는'];
+const NAME_NOUN = ['호랑이', '토끼', '판다', '여우', '너구리', '다람쥐', '펭귄', '고양이', '강아지', '사자', '곰', '부엉이', '수달', '햄스터', '코알라', '문어'];
+function randomName() {
+  return `${NAME_ADJ[crypto.randomInt(NAME_ADJ.length)]} ${NAME_NOUN[crypto.randomInt(NAME_NOUN.length)]}`;
+}
+
 const MODES = ['last-winner', 'last-loser'];
 const ALLOWED_SECONDS = [0, 5, 10, 15, 20, 30]; // 0 = 무제한
 const REVEAL_GRACE_MS = 5200; // 결과 공개 연출(룰렛+확정)이 도는 동안 다음 라운드 시간을 깎지 않도록 여유
@@ -276,7 +283,7 @@ const server = http.createServer(async (req, res) => {
           const body = await readBody(req);
           if (room.status !== 'lobby') return sendJson(res, 409, { error: '이미 게임이 시작되어 참가할 수 없어요. 관전만 가능합니다.' });
           if (room.players.length >= MAX_PLAYERS) return sendJson(res, 409, { error: '정원이 가득 찼어요.' });
-          let name = (body.name || '').trim().slice(0, 20) || `참가자${room.players.length + 1}`;
+          let name = (body.name || '').trim().slice(0, 20) || randomName();
           // 이름 중복 방지 (이름을 키로 쓰는 라운드 기록이 뭉개지지 않도록)
           if (room.players.some((p) => p.name === name)) {
             let n = 2;
