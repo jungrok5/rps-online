@@ -38,12 +38,15 @@ function token() {
   return randomId(16);
 }
 
-function createRoom(title) {
+const MODES = ['last-winner', 'last-loser'];
+
+function createRoom(title, mode) {
   let id;
   do { id = randomId(6); } while (rooms[id]);
   const room = {
     id,
     title: (title || '가위바위보 서바이벌').slice(0, 40),
+    mode: MODES.includes(mode) ? mode : 'last-winner',
     hostToken: token(),
     status: 'lobby', // 'lobby' | 'playing' | 'finished'
     createdAt: Date.now(),
@@ -79,13 +82,25 @@ function maybeResolveRound(room) {
     const [a, b] = distinct;
     const winningType = BEATS[a] === b ? a : b; // a가 b를 이기면 a, 아니면 b
     const losingType = winningType === a ? b : a;
-    for (const p of alive) {
-      if (room.choices[p.id] === losingType) {
-        p.alive = false;
-        eliminated.push(p.name);
+    if (room.mode === 'last-loser') {
+      // 한 명이 질 때까지: 이긴 쪽이 빠지고(안전), 진 쪽이 계속 남는다
+      for (const p of alive) {
+        if (room.choices[p.id] === winningType) {
+          p.alive = false; // 안전하게 통과 → 풀에서 제외
+          eliminated.push(p.name);
+        }
       }
+      note = `${labelKo(winningType)} 통과(안전) → ${labelKo(losingType)} 잔류`;
+    } else {
+      // 한 명이 이길 때까지: 진 쪽 탈락, 이긴 사람끼리 올라감
+      for (const p of alive) {
+        if (room.choices[p.id] === losingType) {
+          p.alive = false;
+          eliminated.push(p.name);
+        }
+      }
+      note = `${labelKo(winningType)} 승 → ${labelKo(losingType)} 탈락`;
     }
-    note = `${labelKo(winningType)} 승 → ${labelKo(losingType)} 탈락`;
   } else {
     // 한 종류뿐이거나 세 종류 모두 → 무승부, 같은 인원으로 재대결
     note = distinct.length === 1 ? '모두 같은 선택, 무승부 → 재대결' : '세 종류 모두 등장, 무승부 → 재대결';
@@ -112,6 +127,7 @@ function publicState(room) {
   return {
     id: room.id,
     title: room.title,
+    mode: room.mode,
     status: room.status,
     round: room.round,
     players: room.players.map((p) => ({ id: p.id, name: p.name, alive: p.alive })),
@@ -175,7 +191,7 @@ const server = http.createServer(async (req, res) => {
       // 방 생성
       if (pathname === '/api/rooms' && req.method === 'POST') {
         const body = await readBody(req);
-        const room = createRoom(body.title);
+        const room = createRoom(body.title, body.mode);
         return sendJson(res, 200, { roomId: room.id, hostToken: room.hostToken });
       }
 

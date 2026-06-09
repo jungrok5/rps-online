@@ -14,6 +14,19 @@
     <div class="card">
       <label for="title">게임 제목 (선택)</label>
       <input id="title" type="text" placeholder="예: 점심내기 가위바위보" maxlength="40" />
+
+      <label class="mt">게임 방식</label>
+      <div class="modes">
+        <button type="button" class="mode selected" data-mode="last-winner">
+          🏆 한 명이 이길 때까지
+          <span class="desc">진 쪽 탈락, 이긴 사람끼리 올라가 최후의 1인이 우승</span>
+        </button>
+        <button type="button" class="mode" data-mode="last-loser">
+          💀 한 명이 질 때까지
+          <span class="desc">이긴 쪽은 안전, 진 사람끼리 남아 마지막 1인이 벌칙 당첨</span>
+        </button>
+      </div>
+
       <button class="block mt" id="create">새 게임 만들기</button>
       <div class="err" id="err"></div>
     </div>
@@ -24,13 +37,21 @@
   <script>
     const btn = document.getElementById('create');
     const err = document.getElementById('err');
+    let mode = 'last-winner';
+    document.querySelectorAll('.mode').forEach((el) => {
+      el.addEventListener('click', () => {
+        document.querySelectorAll('.mode').forEach((m) => m.classList.remove('selected'));
+        el.classList.add('selected');
+        mode = el.dataset.mode;
+      });
+    });
     btn.addEventListener('click', async () => {
       btn.disabled = true; err.textContent = '';
       try {
         const res = await fetch('/api/rooms', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: document.getElementById('title').value }),
+          body: JSON.stringify({ title: document.getElementById('title').value, mode }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '생성 실패');

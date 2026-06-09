@@ -54,6 +54,9 @@
     // ---------------- 렌더링 ----------------
     function render(s) {
       document.getElementById('title').textContent = s.title;
+      document.getElementById('subtitle').textContent = s.mode === 'last-loser'
+        ? '💀 한 명이 질 때까지 — 마지막에 남는 사람이 벌칙 당첨!'
+        : '🏆 한 명이 이길 때까지 — 최후의 1인이 우승!';
       const isHost = !!hostToken;
       let html = '';
 
@@ -79,11 +82,14 @@
       </div>`;
     }
 
+    function aliveLabel(s) { return s.mode === 'last-loser' ? '남음' : '생존'; }
+    function deadLabel(s) { return s.mode === 'last-loser' ? '통과' : '탈락'; }
+
     function playerList(s) {
       return `<ul class="players">` + s.players.map(p => {
         const tag = s.status === 'lobby'
           ? '<span class="badge live">대기</span>'
-          : (p.alive ? '<span class="badge live">생존</span>' : '<span class="badge">탈락</span>');
+          : (p.alive ? `<span class="badge live">${aliveLabel(s)}</span>` : `<span class="badge">${deadLabel(s)}</span>`);
         const meMark = (me && p.id === me.playerId) ? ' (나)' : '';
         return `<li class="${p.alive ? '' : 'dead'}"><span>${escapeHtml(p.name)}${meMark}</span>${tag}</li>`;
       }).join('') + `</ul>`;
@@ -118,7 +124,9 @@
       } else if (!mine) {
         html += `<p class="status">관전 중입니다 👀</p>`;
       } else if (!mine.alive) {
-        html += `<p class="status">아쉽지만 탈락했어요 😢 관전 중…</p>`;
+        html += s.mode === 'last-loser'
+          ? `<p class="status">통과! 안전합니다 😎 결과를 지켜보세요…</p>`
+          : `<p class="status">아쉽지만 탈락했어요 😢 관전 중…</p>`;
       } else if (submittedMe) {
         html += `<p class="status">선택 완료! 다른 사람을 기다리는 중… (${s.submitted.length}/${s.aliveCount})</p>`;
       } else {
@@ -136,7 +144,7 @@
     function playerStatusCard(s) {
       return `<div class="card"><label>대기 현황</label><ul class="players">` +
         s.players.map(p => {
-          if (!p.alive) return `<li class="dead"><span>${escapeHtml(p.name)}</span><span class="badge">탈락</span></li>`;
+          if (!p.alive) return `<li class="dead"><span>${escapeHtml(p.name)}</span><span class="badge">${deadLabel(s)}</span></li>`;
           const done = s.submitted.includes(p.id);
           const tag = done ? '<span class="badge done">제출완료</span>' : '<span class="badge live">선택중…</span>';
           return `<li><span>${escapeHtml(p.name)}</span>${tag}</li>`;
@@ -144,9 +152,10 @@
     }
 
     function finishedView(s, isHost) {
+      const loser = s.mode === 'last-loser';
       let html = `<div class="card center">
-        <div class="trophy">🏆</div>
-        <div class="big">우승</div>
+        <div class="trophy">${loser ? '💀' : '🏆'}</div>
+        <div class="big">${loser ? '벌칙 당첨' : '우승'}</div>
         <div class="winner">${escapeHtml(s.winner || '?')}</div>`;
       if (isHost) html += `<button class="block mt" id="resetBtn">같은 멤버로 다시 하기</button>`;
       html += `</div>`;
