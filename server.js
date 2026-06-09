@@ -13,6 +13,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const zlib = require('zlib');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -204,16 +205,37 @@ const MIME = {
   '.css': 'text/css; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
   '.svg': 'image/svg+xml',
+  '.json': 'application/json; charset=utf-8',
+  '.glb': 'model/gltf-binary',
+  '.gltf': 'model/gltf+json',
+  '.bin': 'application/octet-stream',
+  '.png': 'image/png',
+  '.txt': 'text/plain; charset=utf-8',
 };
+const GZIP_TYPES = new Set(['.html', '.css', '.js', '.svg', '.json', '.gltf', '.txt']);
 
-function serveFile(res, filePath) {
+function serveFile(res, filePath, req) {
   fs.readFile(filePath, (err, buf) => {
     if (err) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Not found'); return; }
-    res.writeHead(200, {
-      'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream',
-      // 버전 관리가 없으므로 항상 최신을 받도록 캐시를 끈다 (옛 화면 고착 방지)
-      'Cache-Control': 'no-store, must-revalidate',
-    });
+    const ext = path.extname(filePath);
+    // 라이브러리/에셋(/vendor, /assets)은 불변 → 장기 캐시. 그 외(HTML/CSS)는 항상 최신.
+    const immutable = /[\\/](vendor|assets)[\\/]/.test(filePath);
+    const headers = {
+      'Content-Type': MIME[ext] || 'application/octet-stream',
+      'Cache-Control': immutable ? 'public, max-age=31536000, immutable' : 'no-store, must-revalidate',
+    };
+    const acceptsGzip = req && /\bgzip\b/.test(req.headers['accept-encoding'] || '');
+    if (acceptsGzip && GZIP_TYPES.has(ext)) {
+      zlib.gzip(buf, (gzErr, gz) => {
+        if (gzErr) { res.writeHead(200, headers); res.end(buf); return; }
+        headers['Content-Encoding'] = 'gzip';
+        headers['Vary'] = 'Accept-Encoding';
+        res.writeHead(200, headers);
+        res.end(gz);
+      });
+      return;
+    }
+    res.writeHead(200, headers);
     res.end(buf);
   });
 }
@@ -320,8 +342,8 @@ const server = http.createServer(async (req, res) => {
   }
 
   // --- 정적 페이지 ---
-  if (pathname === '/' ) return serveFile(res, path.join(PUBLIC_DIR, 'index.html'));
-  if (/^\/r\/[a-z0-9]+$/.test(pathname)) return serveFile(res, path.join(PUBLIC_DIR, 'room.html'));
+  if (pathname === '/' ) return serveFile(res, path.join(PUBLIC_DIR, 'index.html'), req);
+  if (/^\/r\/[a-z0-9]+$/.test(pathname)) return serveFile(res, path.join(PUBLIC_DIR, 'room.html'), req);
 
   // 정적 자산 (디렉터리 탈출 방지): 인코딩 해제 후 정규화하고, PUBLIC_DIR 하위인지 엄격 확인
   let decoded;
@@ -329,7 +351,7 @@ const server = http.createServer(async (req, res) => {
   const safe = path.normalize(decoded).replace(/^(\.\.[/\\])+/, '');
   const filePath = path.join(PUBLIC_DIR, safe);
   if (filePath === PUBLIC_DIR || filePath.startsWith(PUBLIC_DIR + path.sep)) {
-    return serveFile(res, filePath); // 파일이 없으면 serveFile 이 404 처리
+    return serveFile(res, filePath, req); // 파일이 없으면 serveFile 이 404 처리
   }
 
   res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Not found');

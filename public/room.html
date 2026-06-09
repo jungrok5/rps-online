@@ -5,8 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>가위바위보 서바이벌</title>
   <link rel="stylesheet" href="/style.css" />
+  <script type="importmap">
+    { "imports": { "three": "/vendor/three.module.js" } }
+  </script>
 </head>
 <body>
+  <div id="stage"></div>
   <div class="wrap">
     <h1 id="title">가위바위보 서바이벌</h1>
     <p class="sub" id="subtitle"></p>
@@ -95,6 +99,7 @@
       }
       app.innerHTML = html;
       wire(s, isHost);
+      window.RPS3D && window.RPS3D.sync(s, me && me.playerId); // 3D 캐릭터 동기화
     }
 
     function shareCard() {
@@ -123,7 +128,8 @@
 
     function lobbyView(s, isHost) {
       let html = shareCard();
-      html += `<div class="card"><label>참가자 (${s.players.length}명)</label>` + playerList(s);
+      html += `<div class="card"><p class="sub" style="margin:2px 0 8px">현재 ${s.players.length}명 참가</p>`;
+      html += `<div class="only2d"><label>참가자</label>${playerList(s)}</div>`;
       if (!me) {
         html += `<div class="mt"><label for="nameInput">이름을 입력하고 참가하세요</label>
           <div class="row"><input type="text" id="nameInput" placeholder="이름" maxlength="20" />
@@ -176,7 +182,7 @@
     }
 
     function playerStatusCard(s) {
-      return `<div class="card"><label>대기 현황</label><ul class="players">` +
+      return `<div class="card only2d"><label>대기 현황</label><ul class="players">` +
         s.players.map(p => {
           if (!p.alive) return `<li class="dead"><span>${escapeHtml(p.name)}</span><span class="badge">${deadLabel(s)}</span></li>`;
           const done = s.submitted.includes(p.id);
@@ -308,18 +314,39 @@
 
     function playReveal(entry, s, final) {
       revealing = true;
+      document.body.classList.add('revealing'); // 3D일 때 연출 동안 HUD 숨김
       let done = false;
       // 정리(정상/실패 공통): 오버레이 제거 → 렌더 → 다음 미공개 라운드를 즉시 이어서 폴링
       const cleanup = () => {
         if (done) return; done = true;
         clearTimeout(failsafe);
         document.querySelectorAll('.reveal, .flashbang').forEach((el) => el.remove());
+        try { window.RPS3D && window.RPS3D.endReveal(); } catch (e) {}
+        document.body.classList.remove('revealing');
         revealing = false; lastSig = '';
         if (latestState) render(latestState);
         poll(); // 밀린 라운드가 있으면 바로 다음 연출로 연결
       };
-      // 안전장치: 어떤 이유로든 연출이 끝나지 않아도 최대 9초 후 강제 종료
-      const failsafe = setTimeout(cleanup, 9000);
+      // 안전장치: 어떤 이유로든 연출이 끝나지 않아도 최대 12초 후 강제 종료
+      const failsafe = setTimeout(cleanup, 12000);
+
+      // === 3D 무대가 켜져 있으면 캐릭터로 연출 (실패 시 아래 2D로 폴백) ===
+      if (window.RPS3D && window.RPS3D.ready) {
+        try {
+          const outcomes = {};
+          for (const n of Object.keys(entry.picks)) outcomes[n] = outcome(n, entry, s.mode).cls;
+          const payload = {
+            picks: entry.picks,
+            outcomes,
+            verdict: personalVerdict(entry, s, final),
+            note: entry.note + (entry.auto && entry.auto.length ? `  ⏰ ${entry.auto.join(', ')} 시간초과` : ''),
+            final,
+          };
+          window.RPS3D.reveal(payload, cleanup);
+          return;
+        } catch (e) { /* 3D 실패 → 2D 연출로 진행 */ }
+      }
+
       const all = Object.keys(entry.picks);
       const myName = (me && entry.picks[me.name] !== undefined) ? me.name : null;
       const others = all.filter((n) => n !== myName);
@@ -421,8 +448,23 @@
       } catch (e) { /* 네트워크 일시 오류 무시 */ }
     }
 
+    // 3D 무대가 준비되면 호출 (최신 상태로 캐릭터 동기화)
+    window.rpsResync = () => { if (latestState) window.RPS3D?.sync(latestState, me && me.playerId); };
+
     poll();
     setInterval(poll, 1500);
+  </script>
+
+  <!-- 3D 무대 부트스트랩 (실패하면 window.RPS3D 미설정 → 자동 2D 폴백) -->
+  <script type="module">
+    import { init, sync, reveal, endReveal, charCount } from '/scene.js';
+    try {
+      if (init(document.getElementById('stage'))) {
+        window.RPS3D = { ready: true, sync, reveal, endReveal, charCount };
+        document.body.classList.add('has3d');
+        window.rpsResync && window.rpsResync();
+      }
+    } catch (e) { console.warn('3D 비활성화 → 2D 폴백', e); }
   </script>
 </body>
 </html>
