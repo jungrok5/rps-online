@@ -206,18 +206,17 @@ body.has3d .card { background: rgba(26,31,61,.82); backdrop-filter: blur(5px); }
 body.has3d .only2d { display: none; }   /* 참가자/대기 목록은 캐릭터로 대체 */
 body.has3d.revealing .wrap { opacity: 0; pointer-events: none; transition: opacity .3s; } /* 연출 중 HUD 숨김 */
 
-/* 머리 위 닉네임 라벨 (CSS2D) */
+/* 머리 위 닉네임 라벨 (CSS2D) — 그림자 없이 또렷하게, 불투명 배경 */
 .nick {
   pointer-events: none; white-space: nowrap;
-  font: 600 12px/1.2 -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
-  color: #fff; background: rgba(13,17,48,.78); border: 1px solid rgba(255,255,255,.18);
-  padding: 2px 8px; border-radius: 999px; transform: translateY(-2px);
-  text-shadow: 0 1px 2px #000;
+  font: 700 12px/1.2 -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  color: #fff; background: #14193a; border: 1.5px solid rgba(255,255,255,.4);
+  padding: 2px 9px; border-radius: 999px; transform: translateY(-2px);
 }
-.nick.me { border-color: var(--accent); background: rgba(108,123,255,.5); }
+.nick.me { border-color: var(--accent); background: var(--accent); color: #0d1130; }
 .nick.out { opacity: .45; text-decoration: line-through; }
-.nick.win { border-color: var(--good); background: rgba(56,211,159,.55); }
-.nick.lose { border-color: var(--bad); background: rgba(255,107,107,.5); }
+.nick.win { border-color: #c9ffe9; background: #1f9e74; color: #fff; }
+.nick.lose { border-color: #ffd5d5; background: #c0392b; color: #fff; }
 .nick.ready { border-color: var(--good); }
 .nick.ready::after { content: ' ✓'; color: var(--good); font-weight: 800; }
 .rpsemoji { pointer-events: none; font-size: 2.2rem; filter: drop-shadow(0 3px 4px rgba(0,0,0,.5)); }
