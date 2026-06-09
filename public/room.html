@@ -20,6 +20,7 @@
     const roomId = location.pathname.split('/').pop();
     const KO = { rock: '바위', paper: '보', scissors: '가위' };
     const EMOJI = { rock: '✊', paper: '✋', scissors: '✌️' };
+    const CHOICES = ['rock', 'paper', 'scissors'];
 
     // 방장 토큰: 생성 직후 URL 해시로 도착 → localStorage 저장 후 해시 제거
     const hostKey = `rps_host_${roomId}`;
@@ -305,6 +306,12 @@
 
     function playReveal(entry, s) {
       revealing = true;
+      // 안전장치: 어떤 이유로든 연출이 끝나지 않아도 최대 9초 후 강제 종료
+      const failsafe = setTimeout(() => {
+        document.querySelectorAll('.reveal, .flashbang').forEach((el) => el.remove());
+        revealing = false; lastSig = '';
+        if (latestState) render(latestState);
+      }, 9000);
       const all = Object.keys(entry.picks);
       const myName = (me && entry.picks[me.name] !== undefined) ? me.name : null;
       const others = all.filter((n) => n !== myName);
@@ -349,6 +356,7 @@
           overlay.querySelector('#verdict').textContent =
             entry.note + (entry.auto && entry.auto.length ? `  ⏰ ${entry.auto.join(', ')} 시간초과` : '');
           setTimeout(() => {
+            clearTimeout(failsafe);
             overlay.remove();
             revealing = false;
             lastSig = '';
