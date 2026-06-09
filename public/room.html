@@ -34,6 +34,28 @@
     const app = document.getElementById('app');
     const errEl = document.getElementById('err');
     let lastSig = '';
+    let lastSeenHistoryLen = null; // 이번 세션에서 새로 생긴 라운드 결과만 연출
+    let revealing = false;         // 결과 공개 연출 중에는 하단 렌더 보류
+    let latestState = null;
+    let timerEndAt = null, timerTotalMs = 0;
+
+    // 라운드 카운트다운 갱신 (DOM이 있을 때만)
+    function tickTimer() {
+      const el = document.getElementById('timer');
+      if (!el || timerEndAt == null) return;
+      const remain = Math.max(0, timerEndAt - Date.now());
+      const secs = Math.ceil(remain / 1000);
+      el.innerHTML = secs + '<span class="unit">초</span>';
+      const cls = secs <= 3 ? 'danger' : (secs <= 6 ? 'warn' : '');
+      el.className = 'timer ' + cls;
+      const bar = document.getElementById('timerbar');
+      if (bar) {
+        bar.className = 'timerbar ' + cls;
+        const i = bar.querySelector('i');
+        if (i) i.style.width = Math.max(0, Math.min(1, remain / (timerTotalMs || 1))) * 100 + '%';
+      }
+    }
+    setInterval(tickTimer, 200);
 
     function showErr(msg) { errEl.textContent = msg || ''; }
     function toast(msg) {
@@ -58,6 +80,7 @@
         ? '💀 한 명이 질 때까지 — 마지막에 남는 사람이 벌칙 당첨!'
         : '🏆 한 명이 이길 때까지 — 최후의 1인이 우승!';
       const isHost = !!hostToken;
+      timerEndAt = null; // playingView 에서 필요 시 다시 설정
       let html = '';
 
       if (s.status === 'lobby') {
@@ -116,8 +139,15 @@
     function playingView(s) {
       const mine = s.players.find(p => me && p.id === me.playerId);
       const submittedMe = me && s.submitted.includes(me.playerId);
+      const aliveWord = s.mode === 'last-loser' ? '남은' : '생존';
       let html = `<div class="card center">
-        <div class="big"><span class="rno">ROUND ${s.round}</span> · 생존 ${s.aliveCount}명</div>`;
+        <div class="big"><span class="rno">ROUND ${s.round}</span> · ${aliveWord} ${s.aliveCount}명</div>`;
+      if (s.roundSeconds > 0 && s.roundEndsIn != null) {
+        timerEndAt = Date.now() + s.roundEndsIn;
+        timerTotalMs = s.roundSeconds * 1000;
+        html += `<div class="timer" id="timer">${s.roundSeconds}<span class="unit">초</span></div>
+          <div class="timerbar" id="timerbar"><i style="width:100%"></i></div>`;
+      }
 
       if (!me) {
         html += `<p class="status">이미 시작된 게임이에요. 관전 중입니다 👀</p>`;
@@ -243,12 +273,99 @@
       return String(str).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
     }
 
+    // ---------------- 결과 공개 연출 (쫄깃) ----------------
+    const SPIN_MS = 1400;     // 두구두구 도는 시간
+    const HOLD_MS = 2000;     // 공개 후 결과를 보여주는 시간
+
+    function outcome(name, entry, mode) {
+      if (!entry.eliminated.length) return { cls: 'draw', txt: '무승부' };
+      const elim = entry.eliminated.includes(name);
+      if (mode === 'last-loser') {
+        return elim ? { cls: 'good', txt: '통과 😎' } : { cls: 'bad', txt: '잔류 😱' };
+      }
+      return elim ? { cls: 'bad', txt: '탈락 💥' } : { cls: 'good', txt: '생존 ✅' };
+    }
+
+    function playReveal(entry, s) {
+      revealing = true;
+      const names = Object.keys(entry.picks);
+      const overlay = document.createElement('div');
+      overlay.className = 'reveal suspense';
+      overlay.innerHTML =
+        `<div class="drum">🥁 두구두구두구… ROUND ${entry.round}</div>
+         <div class="slots">` +
+        names.map((n, i) => `<div class="slot spin" data-i="${i}">
+            <span class="emo">✊</span>
+            <div class="pname">${escapeHtml(n)}</div>
+            <div class="res"></div>
+          </div>`).join('') +
+        `</div><div class="verdict" id="verdict"></div>`;
+      document.body.appendChild(overlay);
+
+      const slots = [...overlay.querySelectorAll('.slot')];
+      // 슬롯머신처럼 이모지 빠르게 교체
+      const buzz = setInterval(() => {
+        for (const sl of slots) {
+          sl.querySelector('.emo').textContent = EMOJI[CHOICES[Math.floor(Math.random() * 3)]];
+        }
+      }, 90);
+
+      setTimeout(() => {
+        clearInterval(buzz);
+        // 플래시 + 동시 공개
+        const flash = document.createElement('div');
+        flash.className = 'flashbang';
+        document.body.appendChild(flash);
+        setTimeout(() => flash.remove(), 500);
+        if (navigator.vibrate) navigator.vibrate(60);
+
+        overlay.classList.remove('suspense');
+        slots.forEach((sl) => {
+          const name = names[+sl.dataset.i];
+          const choice = entry.picks[name];
+          sl.querySelector('.emo').textContent = EMOJI[choice];
+          const o = outcome(name, entry, s.mode);
+          sl.classList.remove('spin');
+          sl.classList.add('locked', o.cls);
+          sl.querySelector('.res').textContent = o.txt;
+        });
+
+        const v = overlay.querySelector('#verdict');
+        let verdict = entry.note;
+        if (entry.auto && entry.auto.length) verdict += `  ⏰ ${entry.auto.join(', ')} 시간초과 자동선택`;
+        if (s.status === 'finished') {
+          verdict = (s.mode === 'last-loser' ? '💀 벌칙 당첨: ' : '🏆 우승: ') + s.winner;
+        }
+        v.textContent = verdict;
+        setTimeout(() => v.classList.add('show'), 350);
+
+        setTimeout(() => {
+          overlay.remove();
+          revealing = false;
+          lastSig = '';
+          if (latestState) render(latestState);
+        }, HOLD_MS);
+      }, SPIN_MS);
+    }
+
     // ---------------- 폴링 ----------------
     async function poll() {
       try {
         const res = await fetch(`/api/rooms/${roomId}`);
         if (!res.ok) { const d = await res.json(); showErr(d.error); return; }
         const s = await res.json();
+        latestState = s;
+
+        // 새 라운드 결과가 생겼으면 연출 재생
+        if (lastSeenHistoryLen === null) {
+          lastSeenHistoryLen = s.history.length;
+        } else if (s.history.length > lastSeenHistoryLen) {
+          const entry = s.history[s.history.length - 1];
+          lastSeenHistoryLen = s.history.length;
+          if (!revealing) { playReveal(entry, s); return; }
+        }
+        if (revealing) return; // 연출 중에는 하단 렌더 보류
+
         // 상태 서명: 바뀐 경우에만 다시 그림 (입력 포커스 유지)
         const sig = JSON.stringify([s.status, s.round, s.players.map(p=>[p.name,p.alive]), s.submitted.length, s.history.length, s.winner, !!me]);
         if (sig !== lastSig) { lastSig = sig; render(s); }

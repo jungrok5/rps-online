@@ -27,6 +27,14 @@
         </button>
       </div>
 
+      <label class="mt">라운드 제한시간</label>
+      <div class="times">
+        <button type="button" class="time" data-secs="5">5초</button>
+        <button type="button" class="time selected" data-secs="10">10초</button>
+        <button type="button" class="time" data-secs="15">15초</button>
+        <button type="button" class="time" data-secs="0">무제한</button>
+      </div>
+
       <button class="block mt" id="create">새 게임 만들기</button>
       <div class="err" id="err"></div>
     </div>
@@ -38,11 +46,19 @@
     const btn = document.getElementById('create');
     const err = document.getElementById('err');
     let mode = 'last-winner';
+    let roundSeconds = 10;
     document.querySelectorAll('.mode').forEach((el) => {
       el.addEventListener('click', () => {
         document.querySelectorAll('.mode').forEach((m) => m.classList.remove('selected'));
         el.classList.add('selected');
         mode = el.dataset.mode;
+      });
+    });
+    document.querySelectorAll('.time').forEach((el) => {
+      el.addEventListener('click', () => {
+        document.querySelectorAll('.time').forEach((t) => t.classList.remove('selected'));
+        el.classList.add('selected');
+        roundSeconds = Number(el.dataset.secs);
       });
     });
     btn.addEventListener('click', async () => {
@@ -51,7 +67,7 @@
         const res = await fetch('/api/rooms', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: document.getElementById('title').value, mode }),
+          body: JSON.stringify({ title: document.getElementById('title').value, mode, roundSeconds }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '생성 실패');

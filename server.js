@@ -39,14 +39,20 @@ function token() {
 }
 
 const MODES = ['last-winner', 'last-loser'];
+const ALLOWED_SECONDS = [0, 5, 10, 15, 20, 30]; // 0 = 무제한
+const REVEAL_GRACE_MS = 3500; // 결과 공개 연출이 도는 동안 다음 라운드 시간을 깎지 않도록 여유
 
-function createRoom(title, mode) {
+function createRoom(title, mode, roundSeconds) {
   let id;
   do { id = randomId(6); } while (rooms[id]);
+  const secs = ALLOWED_SECONDS.includes(Number(roundSeconds)) ? Number(roundSeconds) : 10;
   const room = {
     id,
     title: (title || '가위바위보 서바이벌').slice(0, 40),
     mode: MODES.includes(mode) ? mode : 'last-winner',
+    roundSeconds: secs,
+    roundDeadline: null,
+    autoPicked: [],
     hostToken: token(),
     status: 'lobby', // 'lobby' | 'playing' | 'finished'
     createdAt: Date.now(),
@@ -62,6 +68,26 @@ function createRoom(title, mode) {
 
 function alivePlayers(room) {
   return room.players.filter((p) => p.alive);
+}
+
+/** 현재 라운드의 마감시간을 설정한다. grace=true 면 결과 공개 연출 시간만큼 여유를 더한다. */
+function setRoundDeadline(room, grace) {
+  room.roundDeadline = room.roundSeconds > 0
+    ? Date.now() + room.roundSeconds * 1000 + (grace ? REVEAL_GRACE_MS : 0)
+    : null;
+}
+
+/** 마감시간이 지났으면 미제출 생존자에게 랜덤 선택을 채워 넣고 라운드를 판정한다. */
+function enforceDeadline(room) {
+  if (room.status !== 'playing' || !room.roundDeadline) return;
+  if (Date.now() < room.roundDeadline) return;
+  for (const p of alivePlayers(room)) {
+    if (!room.choices[p.id]) {
+      room.choices[p.id] = CHOICES[Math.floor(Math.random() * 3)];
+      room.autoPicked.push(p.name);
+    }
+  }
+  maybeResolveRound(room);
 }
 
 /** 현재 라운드의 모든 생존자가 선택을 제출했으면 판정한다. */
@@ -106,15 +132,19 @@ function maybeResolveRound(room) {
     note = distinct.length === 1 ? '모두 같은 선택, 무승부 → 재대결' : '세 종류 모두 등장, 무승부 → 재대결';
   }
 
-  room.history.push({ round: room.round, picks, eliminated, note });
+  const auto = [...new Set(room.autoPicked)];
+  room.history.push({ round: room.round, picks, eliminated, note, auto });
   room.choices = Object.create(null);
+  room.autoPicked = [];
 
   const remaining = alivePlayers(room);
   if (remaining.length === 1) {
     room.status = 'finished';
     room.winner = remaining[0].name;
+    room.roundDeadline = null;
   } else {
     room.round += 1;
+    setRoundDeadline(room, true); // 다음 라운드: 연출 시간만큼 여유 부여
   }
 }
 
@@ -128,6 +158,9 @@ function publicState(room) {
     id: room.id,
     title: room.title,
     mode: room.mode,
+    roundSeconds: room.roundSeconds,
+    roundEndsIn: (room.status === 'playing' && room.roundDeadline)
+      ? Math.max(0, room.roundDeadline - Date.now()) : null,
     status: room.status,
     round: room.round,
     players: room.players.map((p) => ({ id: p.id, name: p.name, alive: p.alive })),
@@ -191,7 +224,7 @@ const server = http.createServer(async (req, res) => {
       // 방 생성
       if (pathname === '/api/rooms' && req.method === 'POST') {
         const body = await readBody(req);
-        const room = createRoom(body.title, body.mode);
+        const room = createRoom(body.title, body.mode, body.roundSeconds);
         return sendJson(res, 200, { roomId: room.id, hostToken: room.hostToken });
       }
 
@@ -202,6 +235,7 @@ const server = http.createServer(async (req, res) => {
         const action = m[2];
 
         if (!action && req.method === 'GET') {
+          enforceDeadline(room);
           return sendJson(res, 200, publicState(room));
         }
 
@@ -222,8 +256,10 @@ const server = http.createServer(async (req, res) => {
           room.status = 'playing';
           room.round = 1;
           room.choices = Object.create(null);
+          room.autoPicked = [];
           room.history = [];
           room.winner = null;
+          setRoundDeadline(room, false);
           return sendJson(res, 200, publicState(room));
         }
 
@@ -245,6 +281,8 @@ const server = http.createServer(async (req, res) => {
           room.status = 'lobby';
           room.round = 0;
           room.choices = Object.create(null);
+          room.autoPicked = [];
+          room.roundDeadline = null;
           room.history = [];
           room.winner = null;
           room.players.forEach((p) => { p.alive = true; });
@@ -271,6 +309,11 @@ const server = http.createServer(async (req, res) => {
 
   res.writeHead(404); res.end('Not found');
 });
+
+// 라운드 마감시간 강제 (1초마다) — 폴링하는 사람이 없어도 게임이 진행되도록
+setInterval(() => {
+  for (const id of Object.keys(rooms)) enforceDeadline(rooms[id]);
+}, 1000).unref();
 
 // 오래된 방 정리 (12시간 지난 방 제거) — 메모리 누수 방지
 setInterval(() => {

@@ -81,6 +81,25 @@ button.block { width: 100%; }
 .mode .desc { display: block; font-size: .8rem; color: var(--muted); font-weight: 400; margin-top: 5px; }
 .mode.selected { border-color: var(--accent2); background: #2a1330; }
 
+.times { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.time { background: #0d1130; border: 2px solid rgba(255,255,255,.1); font-size: .95rem; padding: 12px 0; }
+.time.selected { border-color: var(--accent2); background: #2a1330; }
+
+/* 라운드 카운트다운 타이머 */
+.timer {
+  font-variant-numeric: tabular-nums;
+  font-size: 2.2rem; font-weight: 800; text-align: center; margin: 4px 0 2px;
+  letter-spacing: 1px;
+}
+.timer .unit { font-size: 1rem; color: var(--muted); font-weight: 600; }
+.timer.warn { color: #ffb86b; }
+.timer.danger { color: var(--bad); animation: pulse .6s infinite; }
+.timerbar { height: 8px; border-radius: 999px; background: #0d1130; overflow: hidden; margin: 4px 0 10px; }
+.timerbar > i { display: block; height: 100%; background: linear-gradient(90deg, var(--good), var(--accent)); transition: width .25s linear; }
+.timerbar.warn > i { background: linear-gradient(90deg, #ffb86b, var(--accent2)); }
+.timerbar.danger > i { background: var(--bad); }
+@keyframes pulse { 50% { transform: scale(1.12); opacity: .75; } }
+
 .choices { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .choice {
   font-size: 2.6rem;
@@ -113,6 +132,56 @@ button.block { width: 100%; }
 .history li { padding: 10px 12px; border-radius: 10px; background: #0d1130; margin-bottom: 8px; }
 .history .rno { color: var(--accent); font-weight: 700; }
 .history .note { color: var(--muted); display: block; margin-top: 4px; font-size: .82rem; }
+
+/* ===== 결과 공개 연출 (쫄깃) ===== */
+.reveal {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(8,10,24,.92); backdrop-filter: blur(6px);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 24px; text-align: center; animation: revealIn .2s ease;
+}
+@keyframes revealIn { from { opacity: 0; } to { opacity: 1; } }
+.reveal .drum {
+  font-size: 1.5rem; font-weight: 800; margin-bottom: 18px; color: var(--accent);
+  animation: drumShake .25s infinite;
+}
+.reveal.suspense { animation: bgThrob 1.6s ease infinite; }
+@keyframes bgThrob { 50% { background: rgba(40,12,30,.93); } }
+@keyframes drumShake { 0%,100% { transform: translateX(-3px) rotate(-1deg); } 50% { transform: translateX(3px) rotate(1deg); } }
+
+.reveal .slots {
+  display: grid; gap: 12px; width: 100%; max-width: 420px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+.slot {
+  background: var(--card); border: 2px solid rgba(255,255,255,.12);
+  border-radius: 16px; padding: 16px 8px;
+}
+.slot .emo { font-size: 2.8rem; line-height: 1.1; display: block; }
+.slot.spin .emo { animation: spinBuzz .09s infinite; }
+@keyframes spinBuzz { 0%,100% { transform: translateY(-2px) scale(1.05); } 50% { transform: translateY(2px) scale(.95); } }
+.slot .pname { font-size: .9rem; margin-top: 8px; font-weight: 600; }
+.slot .res { font-size: .78rem; margin-top: 4px; min-height: 1em; font-weight: 700; }
+
+.slot.locked .emo { animation: pop .45s cubic-bezier(.2,1.6,.4,1); }
+@keyframes pop { 0% { transform: scale(0.2) rotate(-25deg); } 70% { transform: scale(1.35) rotate(8deg); } 100% { transform: scale(1) rotate(0); } }
+
+.slot.good { border-color: var(--good); box-shadow: 0 0 22px rgba(56,211,159,.55); background: #10261f; }
+.slot.good .res { color: var(--good); }
+.slot.bad { border-color: var(--bad); background: #2a1414; animation: loseShake .4s 1; }
+.slot.bad .emo { filter: grayscale(.6); opacity: .65; }
+.slot.bad .res { color: var(--bad); }
+.slot.draw { border-color: var(--muted); }
+.slot.draw .res { color: var(--muted); }
+@keyframes loseShake { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-8px); } 40% { transform: translateX(8px); } 60% { transform: translateX(-5px); } 80% { transform: translateX(5px); } }
+
+.reveal .verdict {
+  margin-top: 22px; font-size: 1.25rem; font-weight: 800;
+  opacity: 0; transform: translateY(8px); transition: opacity .3s, transform .3s;
+}
+.reveal .verdict.show { opacity: 1; transform: translateY(0); }
+.flashbang { position: fixed; inset: 0; background: #fff; z-index: 101; pointer-events: none; animation: flash .5s ease forwards; }
+@keyframes flash { 0% { opacity: .85; } 100% { opacity: 0; } }
 
 .toast {
   position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
