@@ -22,6 +22,43 @@ const loader = new GLTFLoader();
 const modelCache = new Map();  // idx -> Promise<{scene, animations, scale, yOffset}>
 const chars = new Map();       // playerId -> char object
 let banners = [];
+let currentN = 0;
+const camPos = new THREE.Vector3(0, 2.6, 9);   // 카메라 목표 위치
+const camLook = new THREE.Vector3(0, -0.4, -1.2); // 시선 목표
+const curLook = new THREE.Vector3(0, -0.4, -1.2); // 부드럽게 보간되는 현재 시선
+
+// ---- 그리드 배치: 한 줄 최대 5명, 최대 10줄(=50명) ----
+const PER_ROW = 5, COL_X = 1.35, ROW_Z = 1.5, FRONT_Z = -0.4;
+function layout(n, gather) {
+  const cx = COL_X * (gather ? 0.78 : 1), rz = ROW_Z * (gather ? 0.82 : 1);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const r = Math.floor(i / PER_ROW);
+    const rowCount = Math.min(PER_ROW, n - r * PER_ROW);
+    const c = i % PER_ROW;
+    out.push(new THREE.Vector3((c - (rowCount - 1) / 2) * cx, 0, FRONT_Z - r * rz));
+  }
+  return out;
+}
+
+// 인원수에 맞춰 전체가 화면에 들어오도록 카메라 목표를 계산
+function fitCamera(n) {
+  if (!n || !camera) { camPos.set(0, 2.6, 9); camLook.set(0, -0.4, -1.2); return; }
+  const pos = layout(n, false);
+  let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
+  for (const p of pos) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z); }
+  const halfW = (maxX - minX) / 2 + 0.8;          // 캐릭터 폭 여유
+  const depth = (maxZ - minZ);
+  const cz = (minZ + maxZ) / 2;
+  const vFov = camera.fov * Math.PI / 180;
+  const aspect = camera.aspect || 0.6;
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
+  const vertExtent = TARGET_H + 1.6 + depth * 0.5; // 키 + 라벨 + 깊이로 인한 세로 폭
+  const dist = Math.max(halfW / Math.tan(hFov / 2), (vertExtent / 2) / Math.tan(vFov / 2)) * 1.05 + depth * 0.5 + 1.4;
+  // 캐릭터들이 화면 상단(HUD 위)에 오도록: 카메라를 높이고 시선을 규모에 비례해 아래로
+  camPos.set(0, dist * 0.40 + 1.0, cz + dist * 0.9);
+  camLook.set(0, -dist * 0.16 - 0.2, cz);
+}
 
 function hashIdx(id) {
   let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
@@ -60,21 +97,21 @@ export function init(container) {
 
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0f1226);
-    scene.fog = new THREE.Fog(0x0f1226, 13, 30);
+    scene.fog = new THREE.Fog(0x0f1226, 30, 90); // 카메라 거리가 가변이라 멀리 밀어 둠
 
-    camera = new THREE.PerspectiveCamera(46, 1, 0.1, 100);
-    camera.position.set(0, 2.6, 9.0);
-    camera.lookAt(0, -0.5, -1.2);
+    camera = new THREE.PerspectiveCamera(46, 1, 0.1, 200);
+    camera.position.copy(camPos);
+    camera.lookAt(curLook);
 
     const hemi = new THREE.HemisphereLight(0xbfd4ff, 0x202440, 1.1);
     scene.add(hemi);
     const dir = new THREE.DirectionalLight(0xffffff, 1.6);
     dir.position.set(4, 9, 6);
     dir.castShadow = true;
-    dir.shadow.mapSize.set(1024, 1024);
-    dir.shadow.camera.near = 1; dir.shadow.camera.far = 30;
-    dir.shadow.camera.left = -10; dir.shadow.camera.right = 10;
-    dir.shadow.camera.top = 10; dir.shadow.camera.bottom = -10;
+    dir.shadow.mapSize.set(2048, 2048);
+    dir.shadow.camera.near = 1; dir.shadow.camera.far = 60;
+    dir.shadow.camera.left = -18; dir.shadow.camera.right = 18;
+    dir.shadow.camera.top = 18; dir.shadow.camera.bottom = -18;
     scene.add(dir);
 
     ground = new THREE.Mesh(
@@ -112,12 +149,17 @@ function resize() {
   renderer.setSize(w, h);
   labelRenderer.setSize(w, h);
   camera.aspect = w / h; camera.updateProjectionMatrix();
+  fitCamera(currentN); // 화면 비율이 바뀌면 다시 맞춤
 }
 
 function loop() {
   if (!running || !ready) return;
   requestAnimationFrame(loop);
   const dt = Math.min(clock.getDelta(), 0.05);
+  // 카메라 부드럽게 목표로 이동
+  camera.position.lerp(camPos, Math.min(1, dt * 2.5));
+  curLook.lerp(camLook, Math.min(1, dt * 2.5));
+  camera.lookAt(curLook);
   for (const c of chars.values()) {
     if (c.mixer) c.mixer.update(dt);
     // 위치 보간 + 걷기/대기 자동 전환 (연출 중엔 명시 제어)
@@ -151,17 +193,7 @@ function play(c, name, opts) {
   c.current = action;
 }
 
-// 카메라를 향한 가벼운 호(arc) 배치 좌표. 인원이 늘면 간격을 좁혀 화면 밖으로 안 나가게.
-function slot(i, n, gather) {
-  const span = gather ? 2.4 : 3.2;           // 양끝 |x| 가 대략 span/2 를 넘지 않도록
-  const cap = gather ? 0.95 : 1.4;
-  const spacing = Math.min(cap, span / Math.max(1, n - 1));
-  const x = (i - (n - 1) / 2) * spacing;
-  const z = -1.2 - Math.abs(x) * 0.1;        // 양끝을 살짝 뒤로 (가림 방지)
-  return new THREE.Vector3(x, 0, z);
-}
-
-async function spawn(player, i, n) {
+async function spawn(player, pos) {
   const idx = hashIdx(player.id);
   const m = await loadModel(idx);
   if (chars.has(player.id)) return; // 동시성 가드
@@ -171,7 +203,7 @@ async function spawn(player, i, n) {
   model.position.y = m.yOffset;
   group.add(model);
   group.rotation.y = FACE;
-  group.position.copy(slot(i, n, false));
+  group.position.copy(pos);
 
   const mixer = new THREE.AnimationMixer(model);
   const actions = {};
@@ -184,7 +216,7 @@ async function spawn(player, i, n) {
   group.add(rps.obj);
 
   const c = { group, model, mixer, actions, current: null, nick, rps,
-              target: slot(i, n, false), lockAnim: false };
+              target: pos.clone(), lockAnim: false };
   chars.set(player.id, c);
   scene.add(group);
   play(c, 'idle');
@@ -195,12 +227,15 @@ export function sync(state, meId) {
   try {
     const players = state.players || [];
     const n = players.length;
+    currentN = n;
+    const pos = layout(n, false);
+    fitCamera(n);
     const seen = new Set();
     players.forEach((p, i) => {
       seen.add(p.id);
       const c = chars.get(p.id);
-      if (!c) { spawn(p, i, n); return; }
-      c.target = slot(i, n, false);
+      if (!c) { spawn(p, pos[i]); return; }
+      c.target = pos[i];
       c.nick.el.textContent = p.name;
       c.nick.el.classList.toggle('me', p.id === meId);
       c.nick.el.classList.toggle('out', !p.alive);
@@ -256,8 +291,9 @@ export function reveal(payload, onDone) {
     const list = names.map((nm) => byName.get(nm)).filter(Boolean);
     const n = list.length;
 
-    // 1) 가운데로 모이기 + 카메라 정면
-    list.forEach((c, i) => { c.lockAnim = false; c.target = slot(i, n, true); });
+    // 1) 가운데로 모이기 (이번 라운드 참가자들을 촘촘한 그리드로)
+    const gpos = layout(n, true);
+    list.forEach((c, i) => { c.lockAnim = false; c.target = gpos[i]; });
     const drum = banner('r3d-drum', '🥁 두구두구두구…');
 
     // 2) 모인 뒤 들썩(점프 반복)

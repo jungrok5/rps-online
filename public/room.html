@@ -220,10 +220,11 @@
       const copyBtn = document.getElementById('copyBtn');
       if (copyBtn) copyBtn.onclick = () => {
         const inp = document.getElementById('shareLink');
-        inp.select();
-        navigator.clipboard?.writeText(inp.value).then(() => toast('링크 복사됨!')).catch(() => {
-          document.execCommand('copy'); toast('링크 복사됨!');
-        });
+        const text = `${s.title}\n${inp.value}`; // 제목 + 링크 함께 복사
+        const fallback = () => { inp.select(); document.execCommand('copy'); };
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(text).then(() => toast('제목과 링크 복사됨!')).catch(() => { fallback(); toast('복사됨!'); });
+        } else { fallback(); toast('복사됨!'); }
       };
 
       const joinBtn = document.getElementById('joinBtn');
