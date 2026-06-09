@@ -12,9 +12,12 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const MAX_ROOMS = 5000;     // 메모리 보호: 동시 보관 방 수 상한
+const MAX_PLAYERS = 50;     // 방당 인원 상한
 
 /** @type {Record<string, Room>} 메모리 저장소 */
 const rooms = Object.create(null);
@@ -30,7 +33,7 @@ const BEATS = { rock: 'scissors', scissors: 'paper', paper: 'rock' };
 function randomId(len) {
   const chars = 'abcdefghijkmnpqrstuvwxyz23456789'; // 헷갈리는 0,O,1,l 제외
   let out = '';
-  for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  for (let i = 0; i < len; i++) out += chars[crypto.randomInt(chars.length)]; // 예측 불가(암호학적)
   return out;
 }
 
@@ -45,7 +48,8 @@ const REVEAL_GRACE_MS = 5200; // 결과 공개 연출(룰렛+확정)이 도는 �
 function createRoom(title, mode, roundSeconds) {
   let id;
   do { id = randomId(6); } while (rooms[id]);
-  const secs = ALLOWED_SECONDS.includes(Number(roundSeconds)) ? Number(roundSeconds) : 10;
+  // 숫자로 명시된 허용값만 인정. null/""/undefined 등은 기본 10초 (0='무제한'과 구분)
+  const secs = (typeof roundSeconds === 'number' && ALLOWED_SECONDS.includes(roundSeconds)) ? roundSeconds : 10;
   const room = {
     id,
     title: (title || '가위바위보 서바이벌').slice(0, 40),
@@ -204,7 +208,7 @@ const MIME = {
 
 function serveFile(res, filePath) {
   fs.readFile(filePath, (err, buf) => {
-    if (err) { res.writeHead(404); res.end('Not found'); return; }
+    if (err) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Not found'); return; }
     res.writeHead(200, {
       'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream',
       // 버전 관리가 없으므로 항상 최신을 받도록 캐시를 끈다 (옛 화면 고착 방지)
@@ -228,11 +232,14 @@ const server = http.createServer(async (req, res) => {
       // 방 생성
       if (pathname === '/api/rooms' && req.method === 'POST') {
         const body = await readBody(req);
+        if (Object.keys(rooms).length >= MAX_ROOMS) {
+          return sendJson(res, 503, { error: '지금 방이 너무 많아요. 잠시 후 다시 시도해 주세요.' });
+        }
         const room = createRoom(body.title, body.mode, body.roundSeconds);
         return sendJson(res, 200, { roomId: room.id, hostToken: room.hostToken });
       }
 
-      const m = pathname.match(/^\/api\/rooms\/([a-z0-9]+)(\/[a-z]+)?$/i);
+      const m = pathname.match(/^\/api\/rooms\/([a-z0-9]+)(\/[a-z]+)?$/);
       if (m) {
         const room = rooms[m[1]];
         if (!room) return sendJson(res, 404, { error: '방을 찾을 수 없어요 (만료되었을 수 있어요).' });
@@ -246,7 +253,14 @@ const server = http.createServer(async (req, res) => {
         if (action === '/join' && req.method === 'POST') {
           const body = await readBody(req);
           if (room.status !== 'lobby') return sendJson(res, 409, { error: '이미 게임이 시작되어 참가할 수 없어요. 관전만 가능합니다.' });
-          const name = (body.name || '').trim().slice(0, 20) || `참가자${room.players.length + 1}`;
+          if (room.players.length >= MAX_PLAYERS) return sendJson(res, 409, { error: '정원이 가득 찼어요.' });
+          let name = (body.name || '').trim().slice(0, 20) || `참가자${room.players.length + 1}`;
+          // 이름 중복 방지 (이름을 키로 쓰는 라운드 기록이 뭉개지지 않도록)
+          if (room.players.some((p) => p.name === name)) {
+            let n = 2;
+            while (room.players.some((p) => p.name === `${name}${n}`)) n++;
+            name = `${name}${n}`;
+          }
           const player = { id: token(), name, alive: true };
           room.players.push(player);
           return sendJson(res, 200, { playerId: player.id, name: player.name });
@@ -274,6 +288,11 @@ const server = http.createServer(async (req, res) => {
           if (!player) return sendJson(res, 403, { error: '참가자 정보를 찾을 수 없어요.' });
           if (!player.alive) return sendJson(res, 409, { error: '이미 탈락했어요. 관전 중입니다.' });
           if (!CHOICES.includes(body.choice)) return sendJson(res, 400, { error: '잘못된 선택이에요.' });
+          // 라운드 경합 방지: 클라가 보고 있던 라운드와 현재 라운드가 다르면 거부
+          // (마감 스윕이 라운드를 넘긴 직후 도착한 선택이 다음 라운드에 잘못 적용되는 것 차단)
+          if (typeof body.round === 'number' && body.round !== room.round) {
+            return sendJson(res, 409, { error: '이미 라운드가 종료됐어요. 다음 라운드를 기다려 주세요.' });
+          }
           room.choices[player.id] = body.choice;
           maybeResolveRound(room);
           return sendJson(res, 200, publicState(room));
@@ -302,16 +321,18 @@ const server = http.createServer(async (req, res) => {
 
   // --- 정적 페이지 ---
   if (pathname === '/' ) return serveFile(res, path.join(PUBLIC_DIR, 'index.html'));
-  if (pathname.match(/^\/r\/[a-z0-9]+$/i)) return serveFile(res, path.join(PUBLIC_DIR, 'room.html'));
+  if (/^\/r\/[a-z0-9]+$/.test(pathname)) return serveFile(res, path.join(PUBLIC_DIR, 'room.html'));
 
-  // 정적 자산 (디렉터리 탈출 방지)
-  const safe = path.normalize(pathname).replace(/^(\.\.[/\\])+/, '');
+  // 정적 자산 (디렉터리 탈출 방지): 인코딩 해제 후 정규화하고, PUBLIC_DIR 하위인지 엄격 확인
+  let decoded;
+  try { decoded = decodeURIComponent(pathname); } catch { decoded = pathname; }
+  const safe = path.normalize(decoded).replace(/^(\.\.[/\\])+/, '');
   const filePath = path.join(PUBLIC_DIR, safe);
-  if (filePath.startsWith(PUBLIC_DIR) && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-    return serveFile(res, filePath);
+  if (filePath === PUBLIC_DIR || filePath.startsWith(PUBLIC_DIR + path.sep)) {
+    return serveFile(res, filePath); // 파일이 없으면 serveFile 이 404 처리
   }
 
-  res.writeHead(404); res.end('Not found');
+  res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Not found');
 });
 
 // 라운드 마감시간 강제 (1초마다) — 폴링하는 사람이 없어도 게임이 진행되도록

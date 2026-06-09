@@ -45,7 +45,9 @@
       const el = document.getElementById('timer');
       if (!el || timerEndAt == null) return;
       const remain = Math.max(0, timerEndAt - Date.now());
-      const secs = Math.ceil(remain / 1000);
+      // 화면 표시는 설정한 제한시간으로 상한 처리 (다음 라운드에 더해지는 연출 여유시간 숨김)
+      const shown = timerTotalMs ? Math.min(remain, timerTotalMs) : remain;
+      const secs = Math.ceil(shown / 1000);
       el.innerHTML = secs + '<span class="unit">초</span>';
       const cls = secs <= 3 ? 'danger' : (secs <= 6 ? 'warn' : '');
       el.className = 'timer ' + cls;
@@ -53,7 +55,7 @@
       if (bar) {
         bar.className = 'timerbar ' + cls;
         const i = bar.querySelector('i');
-        if (i) i.style.width = Math.max(0, Math.min(1, remain / (timerTotalMs || 1))) * 100 + '%';
+        if (i) i.style.width = Math.max(0, Math.min(1, shown / (timerTotalMs || 1))) * 100 + '%';
       }
     }
     setInterval(tickTimer, 200);
@@ -249,7 +251,7 @@
         if (rb) rb.disabled = true;
         if (srcBtn) srcBtn.classList.add('selected');
         showErr('');
-        try { await api('/play', { playerId: me.playerId, choice }); lastSig = ''; poll(); }
+        try { await api('/play', { playerId: me.playerId, choice, round: s.round }); lastSig = ''; poll(); }
         catch (e) {
           showErr(e.message);
           document.querySelectorAll('.choice').forEach(b => b.disabled = false);
@@ -287,16 +289,16 @@
       return elim ? { cls: 'bad', txt: '탈락 💥' } : { cls: 'good', txt: '생존 ✅' };
     }
 
-    // 내 시점의 최종 한 줄 (마지막에 가장 크게 보여줄 문구)
-    function personalVerdict(entry, s) {
+    // 내 시점의 최종 한 줄 (마지막에 가장 크게 보여줄 문구). final = 이 라운드가 게임의 최종 라운드인가
+    function personalVerdict(entry, s, final) {
       const mine = me && entry.picks[me.name] !== undefined;
       if (!mine) {
-        return s.status === 'finished'
+        return final
           ? (s.mode === 'last-loser' ? '💀 벌칙 당첨: ' : '🏆 우승: ') + s.winner
           : entry.note;
       }
       if (!entry.eliminated.length) return '🤝 무승부 — 재대결!';
-      if (s.status === 'finished' && s.winner === me.name) {
+      if (final && s.winner === me.name) {
         return s.mode === 'last-loser' ? '💀 내가 벌칙 당첨…' : '🏆 내가 우승!!';
       }
       const o = outcome(me.name, entry, s.mode);
@@ -304,14 +306,20 @@
                '통과 😎': '😎 통과! 안전!', '잔류 😱': '😱 아직 안 끝났다…' }[o.txt] || o.txt;
     }
 
-    function playReveal(entry, s) {
+    function playReveal(entry, s, final) {
       revealing = true;
-      // 안전장치: 어떤 이유로든 연출이 끝나지 않아도 최대 9초 후 강제 종료
-      const failsafe = setTimeout(() => {
+      let done = false;
+      // 정리(정상/실패 공통): 오버레이 제거 → 렌더 → 다음 미공개 라운드를 즉시 이어서 폴링
+      const cleanup = () => {
+        if (done) return; done = true;
+        clearTimeout(failsafe);
         document.querySelectorAll('.reveal, .flashbang').forEach((el) => el.remove());
         revealing = false; lastSig = '';
         if (latestState) render(latestState);
-      }, 9000);
+        poll(); // 밀린 라운드가 있으면 바로 다음 연출로 연결
+      };
+      // 안전장치: 어떤 이유로든 연출이 끝나지 않아도 최대 9초 후 강제 종료
+      const failsafe = setTimeout(cleanup, 9000);
       const all = Object.keys(entry.picks);
       const myName = (me && entry.picks[me.name] !== undefined) ? me.name : null;
       const others = all.filter((n) => n !== myName);
@@ -338,7 +346,9 @@
 
       // 모든 선택이 멈춘 뒤 → 정적 → '결과 확정'을 마지막에 공개
       const finish = () => {
+        if (done) return; // 안전장치가 이미 정리했으면 무시 (유령 플래시 방지)
         setTimeout(() => {
+          if (done) return;
           const flash = document.createElement('div');
           flash.className = 'flashbang';
           document.body.appendChild(flash);
@@ -351,17 +361,11 @@
             slotEls[n].querySelector('.res').textContent = o.txt;
           }
           const mv = overlay.querySelector('#myverdict');
-          mv.textContent = personalVerdict(entry, s);
+          mv.textContent = personalVerdict(entry, s, final);
           requestAnimationFrame(() => mv.classList.add('show'));
           overlay.querySelector('#verdict').textContent =
             entry.note + (entry.auto && entry.auto.length ? `  ⏰ ${entry.auto.join(', ')} 시간초과` : '');
-          setTimeout(() => {
-            clearTimeout(failsafe);
-            overlay.remove();
-            revealing = false;
-            lastSig = '';
-            if (latestState) render(latestState);
-          }, HOLD_MS);
+          setTimeout(cleanup, HOLD_MS);
         }, 650); // 공개 직후의 '정적'
       };
 
@@ -398,13 +402,16 @@
         const s = await res.json();
         latestState = s;
 
-        // 새 라운드 결과가 생겼으면 연출 재생 (기록이 줄면 = 새 게임 → 카운터 재동기화)
+        // 새 라운드 결과가 생겼으면 한 라운드씩 순서대로 연출 (기록이 줄면 = 새 게임 → 재동기화)
         if (lastSeenHistoryLen === null || s.history.length < lastSeenHistoryLen) {
           lastSeenHistoryLen = s.history.length;
-        } else if (s.history.length > lastSeenHistoryLen) {
-          const entry = s.history[s.history.length - 1];
-          lastSeenHistoryLen = s.history.length;
-          if (!revealing) { playReveal(entry, s); return; }
+        } else if (!revealing && s.history.length > lastSeenHistoryLen) {
+          const idx = lastSeenHistoryLen;            // 아직 안 본 가장 오래된 라운드
+          const entry = s.history[idx];
+          lastSeenHistoryLen = idx + 1;              // 연출 중에는 더 건너뛰지 않음 → 누락 방지
+          const final = (idx === s.history.length - 1) && s.status === 'finished';
+          playReveal(entry, s, final);
+          return;
         }
         if (revealing) return; // 연출 중에는 하단 렌더 보류
 
