@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>가위바위보 서바이벌</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <h1 id="title">가위바위보 서바이벌</h1>
+    <p class="sub" id="subtitle"></p>
+    <div id="app"></div>
+    <div class="err" id="err"></div>
+    <p class="sub center mt"><a href="/">새 방 만들기</a></p>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const roomId = location.pathname.split('/').pop();
+    const KO = { rock: '바위', paper: '보', scissors: '가위' };
+    const EMOJI = { rock: '✊', paper: '✋', scissors: '✌️' };
+
+    // 방장 토큰: 생성 직후 URL 해시로 도착 → localStorage 저장 후 해시 제거
+    const hostKey = `rps_host_${roomId}`;
+    const playerKey = `rps_player_${roomId}`;
+    if (location.hash.startsWith('#host=')) {
+      localStorage.setItem(hostKey, location.hash.slice(6));
+      history.replaceState(null, '', `/r/${roomId}`);
+    }
+    const hostToken = localStorage.getItem(hostKey);
+    let me = JSON.parse(localStorage.getItem(playerKey) || 'null'); // {playerId, name}
+
+    const app = document.getElementById('app');
+    const errEl = document.getElementById('err');
+    let lastSig = '';
+
+    function showErr(msg) { errEl.textContent = msg || ''; }
+    function toast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg; t.classList.add('show');
+      clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), 1800);
+    }
+    async function api(action, body) {
+      const res = await fetch(`/api/rooms/${roomId}${action}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '요청 실패');
+      return data;
+    }
+
+    // ---------------- 렌더링 ----------------
+    function render(s) {
+      document.getElementById('title').textContent = s.title;
+      const isHost = !!hostToken;
+      let html = '';
+
+      if (s.status === 'lobby') {
+        html += lobbyView(s, isHost);
+      } else if (s.status === 'playing') {
+        html += playingView(s);
+      } else if (s.status === 'finished') {
+        html += finishedView(s, isHost);
+      }
+      app.innerHTML = html;
+      wire(s, isHost);
+    }
+
+    function shareCard() {
+      const link = location.origin + '/r/' + roomId;
+      return `<div class="card">
+        <label>친구에게 보낼 링크 (카톡·팀즈에 붙여넣기)</label>
+        <div class="share">
+          <input type="text" id="shareLink" readonly value="${link}" />
+          <button id="copyBtn">복사</button>
+        </div>
+      </div>`;
+    }
+
+    function playerList(s) {
+      return `<ul class="players">` + s.players.map(p => {
+        const tag = s.status === 'lobby'
+          ? '<span class="badge live">대기</span>'
+          : (p.alive ? '<span class="badge live">생존</span>' : '<span class="badge">탈락</span>');
+        const meMark = (me && p.id === me.playerId) ? ' (나)' : '';
+        return `<li class="${p.alive ? '' : 'dead'}"><span>${escapeHtml(p.name)}${meMark}</span>${tag}</li>`;
+      }).join('') + `</ul>`;
+    }
+
+    function lobbyView(s, isHost) {
+      let html = shareCard();
+      html += `<div class="card"><label>참가자 (${s.players.length}명)</label>` + playerList(s);
+      if (!me) {
+        html += `<div class="mt"><label for="nameInput">이름을 입력하고 참가하세요</label>
+          <div class="row"><input type="text" id="nameInput" placeholder="이름" maxlength="20" />
+          <button id="joinBtn">참가</button></div></div>`;
+      } else {
+        html += `<p class="status mt">참가 완료! 방장이 시작하기를 기다리는 중…</p>`;
+      }
+      if (isHost) {
+        const ok = s.players.length >= 2;
+        html += `<button class="block mt" id="startBtn" ${ok ? '' : 'disabled'}>게임 시작 ${ok ? '' : '(2명 이상 필요)'}</button>`;
+      }
+      html += `</div>`;
+      return html;
+    }
+
+    function playingView(s) {
+      const mine = s.players.find(p => me && p.id === me.playerId);
+      const submittedMe = me && s.submitted.includes(me.playerId);
+      let html = `<div class="card center">
+        <div class="big"><span class="rno">ROUND ${s.round}</span> · 생존 ${s.aliveCount}명</div>`;
+
+      if (!me) {
+        html += `<p class="status">이미 시작된 게임이에요. 관전 중입니다 👀</p>`;
+      } else if (!mine) {
+        html += `<p class="status">관전 중입니다 👀</p>`;
+      } else if (!mine.alive) {
+        html += `<p class="status">아쉽지만 탈락했어요 😢 관전 중…</p>`;
+      } else if (submittedMe) {
+        html += `<p class="status">선택 완료! 다른 사람을 기다리는 중… (${s.submitted.length}/${s.aliveCount})</p>`;
+      } else {
+        html += `<p class="status">무엇을 낼까요?</p><div class="choices">` +
+          ['scissors','rock','paper'].map(c =>
+            `<button class="choice" data-choice="${c}">${EMOJI[c]}<span class="ko">${KO[c]}</span></button>`
+          ).join('') + `</div>`;
+      }
+      html += `</div>`;
+      html += playerStatusCard(s);
+      html += historyCard(s);
+      return html;
+    }
+
+    function playerStatusCard(s) {
+      return `<div class="card"><label>대기 현황</label><ul class="players">` +
+        s.players.map(p => {
+          if (!p.alive) return `<li class="dead"><span>${escapeHtml(p.name)}</span><span class="badge">탈락</span></li>`;
+          const done = s.submitted.includes(p.id);
+          const tag = done ? '<span class="badge done">제출완료</span>' : '<span class="badge live">선택중…</span>';
+          return `<li><span>${escapeHtml(p.name)}</span>${tag}</li>`;
+        }).join('') + `</ul></div>`;
+    }
+
+    function finishedView(s, isHost) {
+      let html = `<div class="card center">
+        <div class="trophy">🏆</div>
+        <div class="big">우승</div>
+        <div class="winner">${escapeHtml(s.winner || '?')}</div>`;
+      if (isHost) html += `<button class="block mt" id="resetBtn">같은 멤버로 다시 하기</button>`;
+      html += `</div>`;
+      html += historyCard(s);
+      return html;
+    }
+
+    function historyCard(s) {
+      if (!s.history.length) return '';
+      let html = `<div class="card"><label>라운드 기록</label><ul class="history">`;
+      for (const h of s.history) {
+        const picks = Object.entries(h.picks)
+          .map(([n, c]) => `${escapeHtml(n)} ${EMOJI[c]}`).join(' · ');
+        html += `<li><span class="rno">R${h.round}</span> ${picks}<span class="note">${escapeHtml(h.note)}</span></li>`;
+      }
+      html += `</ul></div>`;
+      return html;
+    }
+
+    // ---------------- 이벤트 연결 ----------------
+    function wire(s, isHost) {
+      const copyBtn = document.getElementById('copyBtn');
+      if (copyBtn) copyBtn.onclick = () => {
+        const inp = document.getElementById('shareLink');
+        inp.select();
+        navigator.clipboard?.writeText(inp.value).then(() => toast('링크 복사됨!')).catch(() => {
+          document.execCommand('copy'); toast('링크 복사됨!');
+        });
+      };
+
+      const joinBtn = document.getElementById('joinBtn');
+      if (joinBtn) joinBtn.onclick = async () => {
+        showErr('');
+        const name = document.getElementById('nameInput').value.trim();
+        try {
+          const d = await api('/join', { name });
+          me = { playerId: d.playerId, name: d.name };
+          localStorage.setItem(playerKey, JSON.stringify(me));
+          lastSig = ''; poll();
+        } catch (e) { showErr(e.message); }
+      };
+
+      const startBtn = document.getElementById('startBtn');
+      if (startBtn) startBtn.onclick = async () => {
+        showErr('');
+        try { await api('/start', { hostToken }); lastSig = ''; poll(); }
+        catch (e) { showErr(e.message); }
+      };
+
+      const resetBtn = document.getElementById('resetBtn');
+      if (resetBtn) resetBtn.onclick = async () => {
+        try { await api('/reset', { hostToken }); lastSig = ''; poll(); }
+        catch (e) { showErr(e.message); }
+      };
+
+      document.querySelectorAll('.choice').forEach(btn => {
+        btn.onclick = async () => {
+          document.querySelectorAll('.choice').forEach(b => b.disabled = true);
+          btn.classList.add('selected');
+          showErr('');
+          try { await api('/play', { playerId: me.playerId, choice: btn.dataset.choice }); lastSig = ''; poll(); }
+          catch (e) { showErr(e.message); document.querySelectorAll('.choice').forEach(b => b.disabled = false); }
+        };
+      });
+    }
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+    }
+
+    // ---------------- 폴링 ----------------
+    async function poll() {
+      try {
+        const res = await fetch(`/api/rooms/${roomId}`);
+        if (!res.ok) { const d = await res.json(); showErr(d.error); return; }
+        const s = await res.json();
+        // 상태 서명: 바뀐 경우에만 다시 그림 (입력 포커스 유지)
+        const sig = JSON.stringify([s.status, s.round, s.players.map(p=>[p.name,p.alive]), s.submitted.length, s.history.length, s.winner, !!me]);
+        if (sig !== lastSig) { lastSig = sig; render(s); }
+      } catch (e) { /* 네트워크 일시 오류 무시 */ }
+    }
+
+    poll();
+    setInterval(poll, 1500);
+  </script>
+</body>
+</html>
