@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: rps-online
+    name: gbb-online
     runtime: node
     plan: free
     branch: claude/rps-site-design-tdzeol
