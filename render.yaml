@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: rps-online
+    runtime: node
+    plan: free
+    branch: claude/rps-site-design-tdzeol
+    buildCommand: npm install
+    startCommand: node server.js
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
