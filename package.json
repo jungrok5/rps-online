@@ -4,7 +4,8 @@
   "description": "데이터베이스 없는 초간단 온라인 가위바위보 서바이벌",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node test/test.js"
   },
   "engines": {
     "node": ">=18"

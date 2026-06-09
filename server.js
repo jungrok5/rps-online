@@ -391,6 +391,15 @@ setInterval(() => {
   }
 }, 60 * 60 * 1000).unref();
 
-server.listen(PORT, () => {
-  console.log(`✊✋✌️  가위바위보 서버 실행 중: http://localhost:${PORT}`);
-});
+// 테스트에서 로직을 직접 부르기 위해 export (require 시), 직접 실행 시 서버 listen
+if (require.main === module) {
+  server.listen(PORT, () => {
+    console.log(`✊✋✌️  가위바위보 서버 실행 중: http://localhost:${PORT}`);
+  });
+} else {
+  module.exports = {
+    server, createRoom, maybeResolveRound, alivePlayers,
+    randomName, uniqueRandomName, BEATS, CHOICES, MODES, ALLOWED_SECONDS,
+  };
+}
+

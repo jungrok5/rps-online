@@ -33,6 +33,23 @@ node server.js
 
 포트 변경: `PORT=8080 node server.js`
 
+## 테스트
+
+```bash
+npm test         # 판정 로직 단위 + HTTP 통합 테스트 (의존성 없음, Node 18+ 전역 fetch)
+```
+
+3D 무대 스모크(스크린샷 캡처)는 Playwright가 필요합니다(선택):
+
+```bash
+npm i playwright
+PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node test/smoke.mjs   # docs/*.png 생성
+```
+
+- `test/test.js` — 가위바위보 판정(승/패/무승부·last-winner/last-loser), 입력 검증,
+  join 중복·랜덤 닉네임, start/play/reset, 라운드 경합 가드, 트래버설 가드 (단위 + 통합)
+- `test/smoke.mjs` — 실제 Chromium으로 3D 연출을 띄워 콘솔 에러 0 + 스크린샷 (브라우저 E2E)
+
 ## 게임 방식 (서바이벌)
 
 1. **새 게임 만들기** → 짧은 방 링크 생성 (`/r/xxxxxx`)
