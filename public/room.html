@@ -133,7 +133,8 @@
         html += `<p class="status">무엇을 낼까요?</p><div class="choices">` +
           ['scissors','rock','paper'].map(c =>
             `<button class="choice" data-choice="${c}">${EMOJI[c]}<span class="ko">${KO[c]}</span></button>`
-          ).join('') + `</div>`;
+          ).join('') + `</div>` +
+          `<button class="block mt secondary" id="randomBtn">🎲 랜덤으로 내기</button>`;
       }
       html += `</div>`;
       html += playerStatusCard(s);
@@ -211,15 +212,31 @@
         catch (e) { showErr(e.message); }
       };
 
+      async function submitChoice(choice, srcBtn) {
+        document.querySelectorAll('.choice').forEach(b => b.disabled = true);
+        const rb = document.getElementById('randomBtn');
+        if (rb) rb.disabled = true;
+        if (srcBtn) srcBtn.classList.add('selected');
+        showErr('');
+        try { await api('/play', { playerId: me.playerId, choice }); lastSig = ''; poll(); }
+        catch (e) {
+          showErr(e.message);
+          document.querySelectorAll('.choice').forEach(b => b.disabled = false);
+          if (rb) rb.disabled = false;
+        }
+      }
+
       document.querySelectorAll('.choice').forEach(btn => {
-        btn.onclick = async () => {
-          document.querySelectorAll('.choice').forEach(b => b.disabled = true);
-          btn.classList.add('selected');
-          showErr('');
-          try { await api('/play', { playerId: me.playerId, choice: btn.dataset.choice }); lastSig = ''; poll(); }
-          catch (e) { showErr(e.message); document.querySelectorAll('.choice').forEach(b => b.disabled = false); }
-        };
+        btn.onclick = () => submitChoice(btn.dataset.choice, btn);
       });
+
+      const randomBtn = document.getElementById('randomBtn');
+      if (randomBtn) randomBtn.onclick = () => {
+        const pick = ['rock', 'paper', 'scissors'][Math.floor(Math.random() * 3)];
+        const target = document.querySelector(`.choice[data-choice="${pick}"]`);
+        randomBtn.textContent = `🎲 ${KO[pick]} ${EMOJI[pick]} 선택!`;
+        submitChoice(pick, target);
+      };
     }
 
     function escapeHtml(str) {
