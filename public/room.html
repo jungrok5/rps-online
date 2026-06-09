@@ -398,8 +398,8 @@
         const s = await res.json();
         latestState = s;
 
-        // 새 라운드 결과가 생겼으면 연출 재생
-        if (lastSeenHistoryLen === null) {
+        // 새 라운드 결과가 생겼으면 연출 재생 (기록이 줄면 = 새 게임 → 카운터 재동기화)
+        if (lastSeenHistoryLen === null || s.history.length < lastSeenHistoryLen) {
           lastSeenHistoryLen = s.history.length;
         } else if (s.history.length > lastSeenHistoryLen) {
           const entry = s.history[s.history.length - 1];
