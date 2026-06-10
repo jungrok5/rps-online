@@ -1,0 +1,4 @@
+User-agent: *
+Disallow: /r/
+
+Sitemap: https://gbb-online.onrender.com/sitemap.xml
