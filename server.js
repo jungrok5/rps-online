@@ -72,7 +72,7 @@ function createRoom(title, mode, roundSeconds) {
   const secs = (typeof roundSeconds === 'number' && ALLOWED_SECONDS.includes(roundSeconds)) ? roundSeconds : 10;
   const room = {
     id,
-    title: (title || '가위바위보 서바이벌').slice(0, 40),
+    title: String(title || '가위바위보 서바이벌').slice(0, 40),
     mode: MODES.includes(mode) ? mode : 'last-winner',
     roundSeconds: secs,
     roundDeadline: null,
@@ -200,6 +200,7 @@ function publicState(room) {
 // ---------------------------------------------------------------------------
 
 function sendJson(res, status, obj) {
+  if (res.writableEnded || res.destroyed) return; // 끊긴 연결엔 쓰지 않음(중복/에러 방지)
   const body = JSON.stringify(obj);
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(body);
@@ -207,15 +208,15 @@ function sendJson(res, status, obj) {
 
 function readBody(req) {
   return new Promise((resolve) => {
-    let data = '';
+    let data = '', done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
     req.on('data', (c) => {
       data += c;
-      if (data.length > 1e6) req.destroy();
+      if (data.length > 1e6) { data = ''; req.destroy(); finish({}); } // 과대 페이로드 차단 + 대기 종료
     });
-    req.on('end', () => {
-      try { resolve(data ? JSON.parse(data) : {}); }
-      catch { resolve({}); }
-    });
+    req.on('end', () => { try { finish(data ? JSON.parse(data) : {}); } catch { finish({}); } });
+    req.on('error', () => finish({}));   // 끊김/오류 시에도 핸들러가 멈추지 않도록
+    req.on('close', () => finish({}));
   });
 }
 
@@ -295,7 +296,7 @@ const server = http.createServer(async (req, res) => {
           const body = await readBody(req);
           if (room.status !== 'lobby') return sendJson(res, 409, { error: '이미 게임이 시작되어 참가할 수 없어요. 관전만 가능합니다.' });
           if (room.players.length >= MAX_PLAYERS) return sendJson(res, 409, { error: '정원이 가득 찼어요.' });
-          let name = (body.name || '').trim().slice(0, 20);
+          let name = String(body.name || '').trim().slice(0, 20);
           if (!name) {
             name = uniqueRandomName(room); // 미입력 → 겹치지 않는 랜덤 닉네임(숫자 없음)
           } else if (room.players.some((p) => p.name === name)) {

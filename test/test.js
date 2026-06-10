@@ -203,6 +203,18 @@ async function integration() {
   assert.strictEqual(r.status, 400);
   ok('start: 2명 미만 거부(400)');
 
+  // === 이상 입력 방어: 엉뚱한 타입/구조에도 500/크래시 없이 안전 처리 ===
+  let w = await http(base, 'POST', '/api/rooms', { title: 12345, mode: { x: 1 }, roundSeconds: 'abc' });
+  assert.strictEqual(w.status, 200, '비정상 타입 입력도 기본값으로 방 생성');
+  let wg = await http(base, 'GET', `/api/rooms/${w.data.roomId}`);
+  assert.strictEqual(typeof wg.data.title, 'string', 'title 은 항상 문자열');
+  assert.strictEqual(wg.data.mode, 'last-winner', '잘못된 mode → 기본값');
+  let wj = await http(base, 'POST', `/api/rooms/${w.data.roomId}/join`, { name: 99999 });
+  assert.strictEqual(typeof wj.data.name, 'string', '이름은 항상 문자열로 강제');
+  let wp = await http(base, 'POST', `/api/rooms/${w.data.roomId}/play`, { playerId: { a: 1 }, choice: ['rock'] });
+  assert.ok([400, 403, 409].includes(wp.status), '비정상 play 거부(크래시 없음)');
+  ok('이상 입력 방어: 비정상 타입에도 500/크래시 없음');
+
   // 디렉터리 트래버설 가드
   let t1 = await fetch(base + '/../server.js').then((x) => x.status).catch(() => 'err');
   assert.notStrictEqual(t1, 200);
